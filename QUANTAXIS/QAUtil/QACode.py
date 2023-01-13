@@ -2,7 +2,7 @@
 #
 # The MIT License (MIT)
 #
-# Copyright (c) 2016-2019 yutiansut/QUANTAXIS
+# Copyright (c) 2016-2021 yutiansut/QUANTAXIS
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,12 @@
 """
 该文件主要是负责一些对于code名称的处理
 """
+
+def QA_util_code_change_format(code):
+    code = code.split('.')[1][0:6]
+    return code+'.XSHE' if code[0] != '6' else code+'.XSHG'
+
+
 
 
 def QA_util_code_tostr(code):
@@ -58,7 +64,7 @@ def QA_util_code_tostr(code):
             return code.split(".")[0]
         raise ValueError("错误的股票代码格式")
     if isinstance(code, list):
-        return QA_util_code_to_str(code[0])
+        return [QA_util_code_tostr(item) for item in code]
 
 
 def QA_util_code_tolist(code, auto_fill=True):

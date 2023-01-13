@@ -2,7 +2,7 @@
 #
 # The MIT License (MIT)
 #
-# Copyright (c) 2016-2019 yutiansut/QUANTAXIS
+# Copyright (c) 2016-2021 yutiansut/QUANTAXIS
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import json
 import datetime
+import json
 import os
 import statistics
 import webbrowser
@@ -33,17 +33,15 @@ from functools import lru_cache
 
 import numpy as np
 import pandas as pd
+from dateutil import parser
 
 try:
-    from pyecharts import Kline, Bar, Grid
+    from pyecharts import Bar, Grid, Kline
 except:
     from pyecharts.charts import Kline, Bar, Grid
 
-from QUANTAXIS.QAUtil import (
-    QA_util_log_info,
-    QA_util_random_with_topic,
-    QA_util_to_json_from_pandas
-)
+from QUANTAXIS.QAUtil import (QA_util_log_info, QA_util_random_with_topic,
+                              QA_util_to_json_from_pandas)
 from QUANTAXIS.QAUtil.QADate import QA_util_to_datetime
 
 # todo 🛠基类名字 _quotation_base 小写是因为 不直接初始化， 建议改成抽象类
@@ -62,12 +60,12 @@ class _quotation_base():
 
     # 🛠todo  DataFrame 改成 df 变量名字
     def __init__(
-            self,
-            DataFrame,
-            dtype='undefined',
-            if_fq='bfq',
-            marketdata_type='None',
-            frequence=None
+        self,
+        DataFrame,
+        dtype='undefined',
+        if_fq='bfq',
+        marketdata_type='None',
+        frequence=None
     ):
         '''
         :param df: DataFrame 类型
@@ -316,6 +314,22 @@ class _quotation_base():
 
     @property
     @lru_cache()
+    def closepanel(self):
+        if 'min' in self.type:
+            return self.close.reset_index().pivot(index='datetime', columns='code', values='close')
+        elif 'day' in self.type:
+            return self.close.reset_index().pivot(index='date', columns='code', values='close')
+
+    @property
+    @lru_cache()
+    def openpanel(self):
+        if 'min' in self.type:
+            return self.open.reset_index().pivot(index='datetime', columns='code', values='open')
+        elif 'day' in self.type:
+            return self.open.reset_index().pivot(index='date', columns='code', values='open')
+
+    @property
+    @lru_cache()
     def amount(self):
         if 'amount' in self.data.columns:
             return self.data.amount
@@ -385,8 +399,9 @@ class _quotation_base():
     def date(self):
         index = self.data.index.remove_unused_levels()
         try:
-            return index.levels[0] if 'date' in self.data.index.names else list(
-                set(self.datetime.date)
+            return index.levels[0
+                                ] if 'date' in self.data.index.names else sorted(
+                list(set(self.datetime.date))
             )
         except:
             return None
@@ -396,7 +411,8 @@ class _quotation_base():
     def datetime(self):
         '分钟线结构返回datetime 日线结构返回date'
         index = self.data.index.remove_unused_levels()
-        return pd.to_datetime(index.levels[0])
+        return pd.to_datetime(
+            index.levels[0], utc=False)
 
     @property
     @lru_cache()
@@ -418,7 +434,7 @@ class _quotation_base():
     @property
     @lru_cache()
     def ndarray(self):
-        return self.to_numpy()
+        return self.reset_index().values
 
     '''
     ########################################################################################################
@@ -642,7 +658,7 @@ class _quotation_base():
     @lru_cache()
     def code(self):
         '返回结构体中的代码'
-        return self.index.levels[1]
+        return self.index.levels[1].map(lambda x: x[0:6])
 
     @property
     @lru_cache()
@@ -673,7 +689,10 @@ class _quotation_base():
         :return:  字典dict 类型
         '''
         try:
-            return self.dicts[(QA_util_to_datetime(time), str(code))]
+            return self.dicts[(
+                QA_util_to_datetime(time),
+                str(code)
+            )]
         except Exception as e:
             raise e
 
@@ -806,15 +825,15 @@ class _quotation_base():
             pass
 
     def groupby(
-            self,
-            by=None,
-            axis=0,
-            level=None,
-            as_index=True,
-            sort=False,
-            group_keys=False,
-            squeeze=False,
-            **kwargs
+        self,
+        by=None,
+        axis=0,
+        level=None,
+        as_index=True,
+        sort=False,
+        group_keys=False,
+        squeeze=False,
+        **kwargs
     ):
         """仿dataframe的groupby写法,但控制了by的code和datetime
 
@@ -838,15 +857,27 @@ class _quotation_base():
         elif by == self.index.names[0]:
             by = None
             level = 0
-        return self.data.groupby(
-            by=by,
-            axis=axis,
-            level=level,
-            as_index=as_index,
-            sort=sort,
-            group_keys=group_keys,
-            squeeze=squeeze
-        )
+        # 适配 pandas 1.0+，避免出现 FutureWarning:
+        # Paramter 'squeeze' is deprecated 提示
+        if (squeeze):
+            return self.data.groupby(
+                by=by,
+                axis=axis,
+                level=level,
+                as_index=as_index,
+                sort=sort,
+                group_keys=group_keys,
+                squeeze=squeeze
+            ).squeeze()
+        else:
+            return self.data.groupby(
+                by=by,
+                axis=axis,
+                level=level,
+                as_index=as_index,
+                sort=sort,
+                group_keys=group_keys,
+            )
 
     def new(self, data=None, dtype=None, if_fq=None):
         """
@@ -901,6 +932,16 @@ class _quotation_base():
             raise RuntimeError(
                 'QADATASTRUCT ERROR: ONLY ACCEPT DATETIME-INDEX FORMAT'
             )
+
+    def locclose(self, codelist, start, end):
+        if 'min' in self.type:
+            start = parser.parse(start)
+            end = parser.parse(end)
+        elif 'day' in self.type:
+            start = parser.parse(start).date()
+            end = parser.parse(end).date()
+
+        return self.closepanel.loc[slice(start, end), codelist]
 
     def iterrows(self):
         return self.data.iterrows()
@@ -1052,7 +1093,13 @@ class _quotation_base():
         add_funcx 会先 reset_index 变成单索引(pd.DatetimeIndex)
         """
 
-        return self.groupby(level=1, sort=False).apply(lambda x: func(x.reset_index(1), *arg, **kwargs))
+        return self.groupby(
+            level=1,
+            sort=False
+        ).apply(lambda x: func(x.reset_index(1),
+                               *arg,
+                               **kwargs))
+
     # def add_func_adv(self, func, *arg, **kwargs):
     #     """QADATASTRUCT的指标/函数apply入口
 
@@ -1143,11 +1190,18 @@ class _quotation_base():
         全部恢复
         """
 
+        if 'min' in self.type:
+            start = parser.parse(start)
+            end = parser.parse(end) if end else end
+        elif 'day' in self.type:
+            start = parser.parse(start).date()
+            end = parser.parse(end).date() if end else end
+
         def _selects(code, start, end):
             if end is not None:
-                return self.data.loc[(slice(pd.Timestamp(start), pd.Timestamp(end)), code), :]
+                return self.data.loc[(slice(start, end), code), :]
             else:
-                return self.data.loc[(slice(pd.Timestamp(start), None), code), :]
+                return self.data.loc[(slice(start, None), code), :]
 
         try:
             return self.new(_selects(code, start, end), self.type, self.if_fq)
@@ -1178,11 +1232,18 @@ class _quotation_base():
         全部恢复
         """
 
+        if 'min' in self.type:
+            start = parser.parse(start)
+            end = parser.parse(end) if end else end
+        elif 'day' in self.type:
+            start = parser.parse(start).date()
+            end = parser.parse(end).date() if end else end
+
         def _select_time(start, end):
             if end is not None:
-                return self.data.loc[(slice(pd.Timestamp(start), pd.Timestamp(end)), slice(None)), :]
+                return self.data.loc[(slice(start, end), slice(None)), :]
             else:
-                return self.data.loc[(slice(pd.Timestamp(start), None), slice(None)), :]
+                return self.data.loc[(slice(start, None), slice(None)), :]
 
         try:
             return self.new(_select_time(start, end), self.type, self.if_fq)
@@ -1275,6 +1336,16 @@ class _quotation_base():
             return self.data.loc[:, columns]
         except:
             pass
+
+    def select_single_time(self, hour=9, minute=0, second=0):
+        """
+        选择一个特定的时间点
+        """
+        return self.data.loc[self.datetime.map(
+            lambda x: x.minute == minute and x.hour == hour and x.second ==
+            second
+        ),
+            slice(None)]
 
     def get_bar(self, code, time):
         """
